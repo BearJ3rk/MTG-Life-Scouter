@@ -87,8 +87,9 @@ public class MainActivity extends Activity {
             while ((line = reader.readLine()) != null) json.append(line);
             JSONObject release = new JSONObject(json.toString());
             String latestTag = release.getString("tag_name");
-            if (versionNumber(latestTag) <= versionNumber(BuildConfig.VERSION_NAME)) {
-                notifyUser("Mana Scouter is already up to date (" + BuildConfig.VERSION_NAME + ").");
+            String installedVersion = currentVersion();
+            if (versionNumber(latestTag) <= versionNumber(installedVersion)) {
+                notifyUser("Mana Scouter is already up to date (" + installedVersion + ").");
                 return;
             }
             JSONArray assets = release.getJSONArray("assets");
@@ -114,6 +115,14 @@ public class MainActivity extends Activity {
         for (int i = 0; i < Math.min(parts.length, 3); i++) value = value * 1000 + Long.parseLong(parts[i]);
         for (int i = parts.length; i < 3; i++) value *= 1000;
         return value;
+    }
+
+    private String currentVersion() {
+        try {
+            return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+        } catch (Exception error) {
+            return "0.0.0";
+        }
     }
 
     private void startUpdateDownload(String url, String fileName, String version) {
