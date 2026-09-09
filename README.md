@@ -1,10 +1,11 @@
-# Arcane Ledger — Android V0.1
+# Mana Scouter — Android V0.2
 
-Local-only Android prototype. Nothing in this project publishes or syncs data.
+Mana Scouter is a local-first tabletop companion for Magic: The Gathering Commander games.
 
-## V0.1 features
+## V0.2 features
 
-- 2, 3, 4, or 6 player life tracking
+- 2, 3, 4, or 6-player life tracking
+- Opposite-side panels rotate 180° for across-table readability
 - Commander damage per opponent
 - Poison/toxic and energy counters
 - Editable player names
@@ -13,9 +14,13 @@ Local-only Android prototype. Nothing in this project publishes or syncs data.
 - Adjustable image overlay for readability
 - Persistent game and appearance settings
 
-Open this folder in Android Studio, allow Gradle sync, and run the `app` configuration on an Android 8.0+ device or emulator.
+## Android build
 
-## Signed builds
+- Application name: Mana Scouter
+- Version name: 0.2.0
+- Version code: 2
+- Minimum Android version: Android 8.0
 
-The private GitHub repository uses an on-demand Actions workflow. Signing credentials are read only from encrypted repository secrets and are never committed to source control. The signed APK is retained as a workflow artifact for 90 days.
+Open this folder in Android Studio, allow Gradle sync, and run the `app` configuration.
 
+Signed GitHub builds read credentials only from encrypted repository secrets. Signing material is never committed to source control.
