@@ -1,8 +1,8 @@
-# Mana Scouter — Android V0.3
+# Mana Scouter — Android V0.4
 
 Mana Scouter is a local-first tabletop companion for Magic: The Gathering Commander games.
 
-## V0.3 features
+## V0.4 features
 
 - 2, 3, 4, or 6-player life tracking
 - Opposite-side panels rotate 180° for across-table readability
@@ -10,6 +10,7 @@ Mana Scouter is a local-first tabletop companion for Magic: The Gathering Comman
 - Centered table controls between player sides
 - Per-player commander damage summaries identify each attacker
 - Hold life controls to change life by 10
+- In-app GitHub release update checker and APK downloader
 - Commander damage per opponent
 - Poison/toxic and energy counters
 - Editable player names
@@ -21,8 +22,8 @@ Mana Scouter is a local-first tabletop companion for Magic: The Gathering Comman
 ## Android build
 
 - Application name: Mana Scouter
-- Version name: 0.3.0
-- Version code: 3
+- Version name: 0.4.0
+- Version code: 4
 - Minimum Android version: Android 8.0
 
 Open this folder in Android Studio, allow Gradle sync, and run the `app` configuration.
