@@ -2,7 +2,7 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <application android:allowBackup="true" android:label="MTG Life Scouter" android:theme="@style/AppTheme" android:usesCleartextTraffic="false">
-        <activity android:name=".MainActivity" android:screenOrientation="unspecified" android:configChanges="orientation|screenSize" android:exported="true">
+        <activity android:name=".MainActivity" android:screenOrientation="landscape" android:configChanges="orientation|screenSize" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
