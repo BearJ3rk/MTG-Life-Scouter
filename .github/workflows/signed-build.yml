@@ -33,20 +33,16 @@ jobs:
           ARCANE_KEY_PASSWORD: ${{ secrets.ARCANE_KEY_PASSWORD }}
         run: gradle --no-daemon clean assembleRelease
       - name: Name release APK
-        run: cp app/build/outputs/apk/release/app-release.apk MTG-Life-Scouter-v0.6.apk
+        run: cp app/build/outputs/apk/release/app-release.apk MTG-Life-Scouter-v0.7.apk
       - name: Upload signed APK artifact
         uses: actions/upload-artifact@v5
         with:
-          name: MTG-Life-Scouter-v0.6-signed
-          path: MTG-Life-Scouter-v0.6.apk
+          name: MTG-Life-Scouter-v0.7-signed
+          path: MTG-Life-Scouter-v0.7.apk
           if-no-files-found: error
           retention-days: 90
       - name: Attach APK to GitHub release
-        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+        if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          RELEASE_TAG="${GITHUB_REF_NAME}"
-          if [ "${GITHUB_REF_TYPE}" != "tag" ]; then RELEASE_TAG="v0.6"; fi
-          gh release upload "$RELEASE_TAG" MTG-Life-Scouter-v0.6.apk --clobber
+        run: gh release upload "${GITHUB_REF_NAME}" MTG-Life-Scouter-v0.7.apk --clobber
