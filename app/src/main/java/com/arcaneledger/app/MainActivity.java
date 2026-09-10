@@ -28,7 +28,7 @@ import java.net.URL;
 
 public class MainActivity extends Activity {
     private static final int FILE_PICKER = 41;
-    private static final String RELEASE_API = "https://api.github.com/repos/BearJ3rk/BearJ3rks-Mana-Scouter/releases/latest";
+    private static final String RELEASE_API = "https://api.github.com/repos/BearJ3rk/MTG-Life-Scouter/releases/latest";
     private WebView webView;
     private ValueCallback<Uri[]> fileCallback;
     private long updateDownloadId = -1;
@@ -80,7 +80,7 @@ public class MainActivity extends Activity {
         try {
             connection = (HttpURLConnection) new URL(RELEASE_API).openConnection();
             connection.setRequestProperty("Accept", "application/vnd.github+json");
-            connection.setRequestProperty("User-Agent", "Mana-Scouter-Android");
+            connection.setRequestProperty("User-Agent", "MTG-Life-Scouter-Android");
             BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream()));
             StringBuilder json = new StringBuilder();
             String line;
@@ -89,7 +89,7 @@ public class MainActivity extends Activity {
             String latestTag = release.getString("tag_name");
             String installedVersion = currentVersion();
             if (versionNumber(latestTag) <= versionNumber(installedVersion)) {
-                notifyUser("Mana Scouter is already up to date (" + installedVersion + ").");
+                notifyUser("MTG Life Scouter is already up to date (" + installedVersion + ").");
                 return;
             }
             JSONArray assets = release.getJSONArray("assets");
@@ -128,12 +128,12 @@ public class MainActivity extends Activity {
     private void startUpdateDownload(String url, String fileName, String version) {
         runOnUiThread(() -> {
             if (Build.VERSION.SDK_INT >= 26 && !getPackageManager().canRequestPackageInstalls()) {
-                Toast.makeText(this, "Allow Mana Scouter to install updates, then tap Update again.", Toast.LENGTH_LONG).show();
+                Toast.makeText(this, "Allow MTG Life Scouter to install updates, then tap Update again.", Toast.LENGTH_LONG).show();
                 startActivity(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + getPackageName())));
                 return;
             }
             DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url));
-            request.setTitle("Mana Scouter " + version);
+            request.setTitle("MTG Life Scouter " + version);
             request.setDescription("Downloading signed update");
             request.setMimeType("application/vnd.android.package-archive");
             request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
