@@ -33,16 +33,16 @@ jobs:
           ARCANE_KEY_PASSWORD: ${{ secrets.ARCANE_KEY_PASSWORD }}
         run: gradle --no-daemon clean assembleRelease
       - name: Name release APK
-        run: cp app/build/outputs/apk/release/app-release.apk Mana-Scouter-v0.4.apk
-      - name: Upload signed APK artifact
+        run: cp app/build/outputs/apk/release/app-release.apk MTG-Life-Scouter-v0.5.apk
+      - name: Upload signed APKartifact
         uses: actions/upload-artifact@v5
         with:
-          name: Mana-Scouter-v0.4-signed
-          path: Mana-Scouter-v0.4.apk
+          name: MTG-Life-Scouter-v0.5-signed
+          path: MTG-Life-Scouter-v0.5.apk
           if-no-files-found: error
           retention-days: 90
       - name: Attach APK to GitHub release
         if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${GITHUB_REF_NAME}" Mana-Scouter-v0.4.apk --clobber
+        run: gh release upload "${GITHUB_REF_NAME}" MTG-Life-Scouter-v0.5.apk --clobber
