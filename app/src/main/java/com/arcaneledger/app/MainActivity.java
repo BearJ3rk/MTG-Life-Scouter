@@ -12,6 +12,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.provider.Settings;
+import android.view.WindowInsets;
 import android.webkit.JavascriptInterface;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
@@ -29,6 +30,7 @@ import java.net.URL;
 public class MainActivity extends Activity {
     private static final int FILE_PICKER = 41;
     private static final String RELEASE_API = "https://api.github.com/repos/BearJ3rk/MTG-Life-Scouter/releases/latest";
+    private static final String RELEASE_PAGE = "https://github.com/BearJ3rk/MTG-Life-Scouter/releases/latest";
     private WebView webView;
     private ValueCallback<Uri[]> fileCallback;
     private long updateDownloadId = -1;
@@ -44,6 +46,17 @@ public class MainActivity extends Activity {
         super.onCreate(state);
         webView = new WebView(this);
         setContentView(webView);
+        webView.setOnApplyWindowInsetsListener((view, insets) -> {
+            if (Build.VERSION.SDK_INT >= 30) {
+                android.graphics.Insets bars = insets.getInsets(WindowInsets.Type.systemBars());
+                view.setPadding(bars.left, bars.top, bars.right, bars.bottom);
+            } else {
+                view.setPadding(insets.getSystemWindowInsetLeft(), insets.getSystemWindowInsetTop(),
+                        insets.getSystemWindowInsetRight(), insets.getSystemWindowInsetBottom());
+            }
+            return insets;
+        });
+        webView.requestApplyInsets();
         WebSettings settings = webView.getSettings();
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
@@ -81,6 +94,12 @@ public class MainActivity extends Activity {
             connection = (HttpURLConnection) new URL(RELEASE_API).openConnection();
             connection.setRequestProperty("Accept", "application/vnd.github+json");
             connection.setRequestProperty("User-Agent", "MTG-Life-Scouter-Android");
+            int responseCode = connection.getResponseCode();
+            if (responseCode == 403 || responseCode == 404) {
+                openReleasesPage("GitHub access is required for this private repository. Opening releases…");
+                return;
+            }
+            if (responseCode < 200 || responseCode >= 300) throw new Exception("GitHub HTTP " + responseCode);
             BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream()));
             StringBuilder json = new StringBuilder();
             String line;
@@ -103,10 +122,17 @@ public class MainActivity extends Activity {
             }
             notifyUser("The latest release does not contain an APK.");
         } catch (Exception error) {
-            notifyUser("Could not check for updates. Check your internet connection.");
+            openReleasesPage("Automatic check was unavailable. Opening GitHub releases…");
         } finally {
             if (connection != null) connection.disconnect();
         }
+    }
+
+    private void openReleasesPage(String message) {
+        runOnUiThread(() -> {
+            Toast.makeText(this, message, Toast.LENGTH_LONG).show();
+            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(RELEASE_PAGE)));
+        });
     }
 
     private long versionNumber(String version) {
