@@ -19,7 +19,7 @@ MTG Life Scouter is a local-first tabletop companion for Magic: The Gathering Co
 - Editable player names
 - Device-local player-card images
 - Device-local table background image
-- Adjustable imae overlay for readability
+- Adjustable image overlay for readability
 - Persistent game and appearance settings
 
 ## Android build
