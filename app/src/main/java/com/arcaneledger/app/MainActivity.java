@@ -31,6 +31,8 @@ public class MainActivity extends Activity {
     private static final int FILE_PICKER = 41;
     private static final String RELEASE_API = "https://api.github.com/repos/BearJ3rk/MTG-Life-Scouter/releases/latest";
     private static final String RELEASE_PAGE = "https://github.com/BearJ3rk/MTG-Life-Scouter/releases/latest";
+    private static final String UPDATE_PREFS = "update-download";
+    private static final String UPDATE_DOWNLOAD_ID = "download-id";
     private WebView webView;
     private ValueCallback<Uri[]> fileCallback;
     private long updateDownloadId = -1;
@@ -46,13 +48,15 @@ public class MainActivity extends Activity {
         super.onCreate(state);
         webView = new WebView(this);
         setContentView(webView);
+        if (Build.VERSION.SDK_INT >= 29) getWindow().setNavigationBarContrastEnforced(false);
         webView.setOnApplyWindowInsetsListener((view, insets) -> {
+            int minimumRight = Math.round(56 * getResources().getDisplayMetrics().density);
             if (Build.VERSION.SDK_INT >= 30) {
                 android.graphics.Insets bars = insets.getInsets(WindowInsets.Type.systemBars());
-                view.setPadding(bars.left, bars.top, bars.right, bars.bottom);
+                view.setPadding(bars.left, bars.top, Math.max(bars.right, minimumRight), bars.bottom);
             } else {
                 view.setPadding(insets.getSystemWindowInsetLeft(), insets.getSystemWindowInsetTop(),
-                        insets.getSystemWindowInsetRight(), insets.getSystemWindowInsetBottom());
+                        Math.max(insets.getSystemWindowInsetRight(), minimumRight), insets.getSystemWindowInsetBottom());
             }
             return insets;
         });
@@ -76,7 +80,7 @@ public class MainActivity extends Activity {
             }
         });
         IntentFilter filter = new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE);
-        if (Build.VERSION.SDK_INT >= 33) registerReceiver(downloadReceiver, filter, RECEIVER_NOT_EXPORTED);
+        if (Build.VERSION.SDK_INT >= 33) registerReceiver(downloadReceiver, filter, RECEIVER_EXPORTED);
         else registerReceiver(downloadReceiver, filter);
         webView.loadUrl("file:///android_asset/index.html");
     }
@@ -153,11 +157,6 @@ public class MainActivity extends Activity {
 
     private void startUpdateDownload(String url, String fileName, String version) {
         runOnUiThread(() -> {
-            if (Build.VERSION.SDK_INT >= 26 && !getPackageManager().canRequestPackageInstalls()) {
-                Toast.makeText(this, "Allow MTG Life Scouter to install updates, then tap Update again.", Toast.LENGTH_LONG).show();
-                startActivity(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + getPackageName())));
-                return;
-            }
             DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url));
             request.setTitle("MTG Life Scouter " + version);
             request.setDescription("Downloading signed update");
@@ -166,6 +165,7 @@ public class MainActivity extends Activity {
             request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName);
             DownloadManager manager = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
             updateDownloadId = manager.enqueue(request);
+            getSharedPreferences(UPDATE_PREFS, MODE_PRIVATE).edit().putLong(UPDATE_DOWNLOAD_ID, updateDownloadId).apply();
             Toast.makeText(this, "Downloading " + version + "…", Toast.LENGTH_LONG).show();
         });
     }
@@ -176,12 +176,38 @@ public class MainActivity extends Activity {
         if (cursor == null || !cursor.moveToFirst()) return;
         int status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
         cursor.close();
-        if (status != DownloadManager.STATUS_SUCCESSFUL) { notifyUser("Update download failed."); return; }
+        if (status == DownloadManager.STATUS_FAILED) {
+            getSharedPreferences(UPDATE_PREFS, MODE_PRIVATE).edit().remove(UPDATE_DOWNLOAD_ID).apply();
+            notifyUser("Update download failed.");
+            return;
+        }
+        if (status != DownloadManager.STATUS_SUCCESSFUL) return;
         Uri apk = manager.getUriForDownloadedFile(id);
+        if (apk == null) { notifyUser("The downloaded update could not be opened."); return; }
+        if (Build.VERSION.SDK_INT >= 26 && !getPackageManager().canRequestPackageInstalls()) {
+            Toast.makeText(this, "Allow MTG Life Scouter to install updates. The installer will open when you return.", Toast.LENGTH_LONG).show();
+            startActivity(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + getPackageName())));
+            return;
+        }
         Intent install = new Intent(Intent.ACTION_VIEW);
         install.setDataAndType(apk, "application/vnd.android.package-archive");
         install.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
-        startActivity(install);
+        try {
+            startActivity(install);
+            updateDownloadId = -1;
+            getSharedPreferences(UPDATE_PREFS, MODE_PRIVATE).edit().remove(UPDATE_DOWNLOAD_ID).apply();
+        } catch (Exception error) {
+            notifyUser("Android could not open the update installer. Tap the completed download notification to install it.");
+        }
+    }
+
+    @Override protected void onResume() {
+        super.onResume();
+        long savedId = getSharedPreferences(UPDATE_PREFS, MODE_PRIVATE).getLong(UPDATE_DOWNLOAD_ID, -1);
+        if (savedId != -1) {
+            updateDownloadId = savedId;
+            installDownloadedApk(savedId);
+        }
     }
 
     private void notifyUser(String message) {
