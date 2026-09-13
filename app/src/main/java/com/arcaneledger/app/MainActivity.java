@@ -12,6 +12,8 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.provider.Settings;
+import android.util.Base64;
+import android.view.ViewGroup;
 import android.view.WindowInsets;
 import android.webkit.JavascriptInterface;
 import android.webkit.ValueCallback;
@@ -19,12 +21,16 @@ import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.FrameLayout;
 import android.widget.Toast;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
+import java.net.URLEncoder;
 import java.net.URL;
 
 public class MainActivity extends Activity {
@@ -46,26 +52,33 @@ public class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        FrameLayout appFrame = new FrameLayout(this);
         webView = new WebView(this);
-        setContentView(webView);
+        appFrame.addView(webView, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        if (Build.VERSION.SDK_INT >= 30) getWindow().setDecorFitsSystemWindows(false);
         if (Build.VERSION.SDK_INT >= 29) getWindow().setNavigationBarContrastEnforced(false);
-        webView.setOnApplyWindowInsetsListener((view, insets) -> {
+        setContentView(appFrame);
+        appFrame.setOnApplyWindowInsetsListener((view, insets) -> {
+            int extraRightCushion = Math.round(16 * getResources().getDisplayMetrics().density);
             int minimumRight = Math.round(56 * getResources().getDisplayMetrics().density);
             if (Build.VERSION.SDK_INT >= 30) {
                 android.graphics.Insets bars = insets.getInsets(WindowInsets.Type.systemBars());
-                view.setPadding(bars.left, bars.top, Math.max(bars.right, minimumRight), bars.bottom);
+                view.setPadding(bars.left, bars.top, Math.max(bars.right + extraRightCushion, minimumRight), bars.bottom);
             } else {
                 view.setPadding(insets.getSystemWindowInsetLeft(), insets.getSystemWindowInsetTop(),
-                        Math.max(insets.getSystemWindowInsetRight(), minimumRight), insets.getSystemWindowInsetBottom());
+                        Math.max(insets.getSystemWindowInsetRight() + extraRightCushion, minimumRight), insets.getSystemWindowInsetBottom());
             }
             return insets;
         });
-        webView.requestApplyInsets();
+        appFrame.requestApplyInsets();
         WebSettings settings = webView.getSettings();
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
         settings.setAllowFileAccess(true);
         settings.setAllowContentAccess(true);
+        webView.setOnLongClickListener(view -> true);
+        webView.setHapticFeedbackEnabled(false);
         webView.addJavascriptInterface(new UpdaterBridge(), "AndroidUpdater");
         webView.setWebViewClient(new WebViewClient());
         webView.setWebChromeClient(new WebChromeClient() {
@@ -90,6 +103,63 @@ public class MainActivity extends Activity {
             runOnUiThread(() -> Toast.makeText(MainActivity.this, "Checking GitHub for updates…", Toast.LENGTH_SHORT).show());
             new Thread(MainActivity.this::fetchLatestRelease).start();
         }
+
+        @JavascriptInterface public void searchCardArt(String query, int playerIndex) {
+            new Thread(() -> fetchCardArt(query, playerIndex)).start();
+        }
+    }
+
+    private void fetchCardArt(String query, int playerIndex) {
+        HttpURLConnection cardConnection = null;
+        HttpURLConnection imageConnection = null;
+        try {
+            String endpoint = "https://api.scryfall.com/cards/named?fuzzy=" + URLEncoder.encode(query, "UTF-8");
+            cardConnection = (HttpURLConnection) new URL(endpoint).openConnection();
+            cardConnection.setRequestProperty("Accept", "application/json;q=0.9,*/*;q=0.8");
+            cardConnection.setRequestProperty("User-Agent", "MTG-Life-Scouter/0.11");
+            if (cardConnection.getResponseCode() != 200) throw new Exception("Card not found.");
+            BufferedReader reader = new BufferedReader(new InputStreamReader(cardConnection.getInputStream()));
+            StringBuilder json = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) json.append(line);
+            JSONObject card = new JSONObject(json.toString());
+            JSONObject images;
+            if (card.has("image_uris")) images = card.getJSONObject("image_uris");
+            else images = card.getJSONArray("card_faces").getJSONObject(0).getJSONObject("image_uris");
+            String imageUrl = images.has("art_crop") ? images.getString("art_crop") : images.getString("normal");
+            imageConnection = (HttpURLConnection) new URL(imageUrl).openConnection();
+            imageConnection.setRequestProperty("User-Agent", "MTG-Life-Scouter/0.11");
+            if (imageConnection.getResponseCode() != 200) throw new Exception("Artwork could not be downloaded.");
+            String mime = imageConnection.getContentType();
+            if (mime == null || !mime.startsWith("image/")) mime = "image/jpeg";
+            InputStream input = imageConnection.getInputStream();
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            byte[] buffer = new byte[8192];
+            int read;
+            while ((read = input.read(buffer)) != -1) {
+                if (output.size() + read > 4 * 1024 * 1024) throw new Exception("Artwork is too large to save locally.");
+                output.write(buffer, 0, read);
+            }
+            input.close();
+            String dataUrl = "data:" + mime + ";base64," + Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP);
+            sendCardArtResult(playerIndex, card.getString("name"), dataUrl, null);
+        } catch (Exception error) {
+            String message = error.getMessage();
+            sendCardArtResult(playerIndex, null, null, message == null || message.isEmpty() ? "Card search failed. Check your connection." : message);
+        } finally {
+            if (cardConnection != null) cardConnection.disconnect();
+            if (imageConnection != null) imageConnection.disconnect();
+        }
+    }
+
+    private void sendCardArtResult(int playerIndex, String name, String dataUrl, String error) {
+        String script = "receiveCardArt(" + playerIndex + "," + jsonString(name) + "," +
+                jsonString(dataUrl) + "," + jsonString(error) + ")";
+        runOnUiThread(() -> webView.evaluateJavascript(script, null));
+    }
+
+    private String jsonString(String value) {
+        return value == null ? "null" : JSONObject.quote(value);
     }
 
     private void fetchLatestRelease() {
