@@ -7,6 +7,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.database.Cursor;
+import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -54,6 +55,9 @@ public class MainActivity extends Activity {
         super.onCreate(state);
         FrameLayout appFrame = new FrameLayout(this);
         webView = new WebView(this);
+        int tableBackground = Color.rgb(14, 15, 13);
+        appFrame.setBackgroundColor(tableBackground);
+        webView.setBackgroundColor(tableBackground);
         appFrame.addView(webView, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         if (Build.VERSION.SDK_INT >= 30) getWindow().setDecorFitsSystemWindows(false);
