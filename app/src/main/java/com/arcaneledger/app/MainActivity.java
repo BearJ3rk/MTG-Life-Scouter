@@ -15,7 +15,9 @@ import android.os.Environment;
 import android.provider.Settings;
 import android.util.Base64;
 import android.view.ViewGroup;
+import android.view.HapticFeedbackConstants;
 import android.view.WindowInsets;
+import android.view.WindowManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
@@ -82,7 +84,7 @@ public class MainActivity extends Activity {
         settings.setAllowFileAccess(true);
         settings.setAllowContentAccess(true);
         webView.setOnLongClickListener(view -> true);
-        webView.setHapticFeedbackEnabled(false);
+        webView.setHapticFeedbackEnabled(true);
         webView.addJavascriptInterface(new UpdaterBridge(), "AndroidUpdater");
         webView.setWebViewClient(new WebViewClient());
         webView.setWebChromeClient(new WebChromeClient() {
@@ -111,6 +113,21 @@ public class MainActivity extends Activity {
         @JavascriptInterface public void searchCardArt(String query, int playerIndex) {
             new Thread(() -> fetchCardArt(query, playerIndex)).start();
         }
+
+        @JavascriptInterface public void setKeepAwake(boolean enabled) {
+            runOnUiThread(() -> {
+                if (enabled) getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            });
+        }
+
+        @JavascriptInterface public void feedback() {
+            runOnUiThread(() -> webView.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP));
+        }
+
+        @JavascriptInterface public void downloadUpdate(String url, String fileName, String version) {
+            startUpdateDownload(url, fileName, version);
+        }
     }
 
     private void fetchCardArt(String query, int playerIndex) {
@@ -120,7 +137,7 @@ public class MainActivity extends Activity {
             String endpoint = "https://api.scryfall.com/cards/named?fuzzy=" + URLEncoder.encode(query, "UTF-8");
             cardConnection = (HttpURLConnection) new URL(endpoint).openConnection();
             cardConnection.setRequestProperty("Accept", "application/json;q=0.9,*/*;q=0.8");
-            cardConnection.setRequestProperty("User-Agent", "MTG-Life-Scouter/0.11");
+            cardConnection.setRequestProperty("User-Agent", "MTG-Life-Scouter/0.14");
             if (cardConnection.getResponseCode() != 200) throw new Exception("Card not found.");
             BufferedReader reader = new BufferedReader(new InputStreamReader(cardConnection.getInputStream()));
             StringBuilder json = new StringBuilder();
@@ -132,7 +149,7 @@ public class MainActivity extends Activity {
             else images = card.getJSONArray("card_faces").getJSONObject(0).getJSONObject("image_uris");
             String imageUrl = images.has("art_crop") ? images.getString("art_crop") : images.getString("normal");
             imageConnection = (HttpURLConnection) new URL(imageUrl).openConnection();
-            imageConnection.setRequestProperty("User-Agent", "MTG-Life-Scouter/0.11");
+            imageConnection.setRequestProperty("User-Agent", "MTG-Life-Scouter/0.14");
             if (imageConnection.getResponseCode() != 200) throw new Exception("Artwork could not be downloaded.");
             String mime = imageConnection.getContentType();
             if (mime == null || !mime.startsWith("image/")) mime = "image/jpeg";
@@ -194,7 +211,7 @@ public class MainActivity extends Activity {
                 JSONObject asset = assets.getJSONObject(i);
                 String name = asset.getString("name");
                 if (name.endsWith(".apk")) {
-                    startUpdateDownload(asset.getString("browser_download_url"), name, latestTag);
+                    offerUpdate(latestTag, release.optString("body", ""), asset.getString("browser_download_url"), name);
                     return;
                 }
             }
@@ -204,6 +221,12 @@ public class MainActivity extends Activity {
         } finally {
             if (connection != null) connection.disconnect();
         }
+    }
+
+    private void offerUpdate(String version, String notes, String url, String fileName) {
+        String script = "showUpdateAvailable(" + jsonString(version) + "," + jsonString(notes) + "," +
+                jsonString(url) + "," + jsonString(fileName) + ")";
+        runOnUiThread(() -> webView.evaluateJavascript(script, null));
     }
 
     private void openReleasesPage(String message) {
