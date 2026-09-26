@@ -69,13 +69,16 @@ public class MainActivity extends Activity {
             int extraRightCushion = Math.round(16 * getResources().getDisplayMetrics().density);
             int minimumRight = Math.round(56 * getResources().getDisplayMetrics().density);
             if (Build.VERSION.SDK_INT >= 30) {
-                android.graphics.Insets bars = insets.getInsets(WindowInsets.Type.systemBars());
+                android.graphics.Insets bars = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
                 view.setPadding(bars.left, bars.top, Math.max(bars.right + extraRightCushion, minimumRight), bars.bottom);
             } else {
                 view.setPadding(insets.getSystemWindowInsetLeft(), insets.getSystemWindowInsetTop(),
                         Math.max(insets.getSystemWindowInsetRight() + extraRightCushion, minimumRight), insets.getSystemWindowInsetBottom());
             }
-            return insets;
+            // The native frame has already reserved the safe area for the WebView.
+            // Do not pass it down and cause a second content offset.
+            if (Build.VERSION.SDK_INT >= 30) return WindowInsets.CONSUMED;
+            return insets.consumeSystemWindowInsets();
         });
         appFrame.requestApplyInsets();
         WebSettings settings = webView.getSettings();
