@@ -6,6 +6,10 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.SharedPreferences;
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
+import android.content.pm.Signature;
 import android.database.Cursor;
 import android.graphics.Color;
 import android.net.Uri;
@@ -30,11 +34,16 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URLEncoder;
 import java.net.URL;
+import java.security.MessageDigest;
+import java.util.Arrays;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class MainActivity extends Activity {
     private static final int FILE_PICKER = 41;
@@ -42,9 +51,16 @@ public class MainActivity extends Activity {
     private static final String RELEASE_PAGE = "https://github.com/BearJ3rk/MTG-Life-Scouter/releases/latest";
     private static final String UPDATE_PREFS = "update-download";
     private static final String UPDATE_DOWNLOAD_ID = "download-id";
+    private static final String UPDATE_VERSION = "version";
+    private static final String UPDATE_DIGEST = "digest";
+    private static final String UPDATE_SIZE = "size";
+    private static final long MAX_UPDATE_BYTES = 100L * 1024 * 1024;
     private WebView webView;
     private ValueCallback<Uri[]> fileCallback;
     private long updateDownloadId = -1;
+    private volatile String offeredUrl, offeredName, offeredVersion, offeredDigest;
+    private volatile long offeredSize;
+    private final AtomicBoolean updateVerificationRunning = new AtomicBoolean(false);
 
     private final BroadcastReceiver downloadReceiver = new BroadcastReceiver() {
         @Override public void onReceive(Context context, Intent intent) {
@@ -204,6 +220,10 @@ public class MainActivity extends Activity {
             while ((line = reader.readLine()) != null) json.append(line);
             JSONObject release = new JSONObject(json.toString());
             String latestTag = release.getString("tag_name");
+            if (!latestTag.matches("v[0-9]+\\.[0-9]+(\\.[0-9]+)?")) {
+                notifyUser("The latest release has an invalid version tag.");
+                return;
+            }
             String installedVersion = currentVersion();
             if (versionNumber(latestTag) <= versionNumber(installedVersion)) {
                 notifyUser("MTG Life Scouter is already up to date (" + installedVersion + ").");
@@ -213,8 +233,17 @@ public class MainActivity extends Activity {
             for (int i = 0; i < assets.length(); i++) {
                 JSONObject asset = assets.getJSONObject(i);
                 String name = asset.getString("name");
-                if (name.endsWith(".apk")) {
-                    offerUpdate(latestTag, release.optString("body", ""), asset.getString("browser_download_url"), name);
+                if (name.equals("MTG-Life-Scouter-" + latestTag + ".apk") &&
+                        "uploaded".equals(asset.optString("state"))) {
+                    String digest = asset.optString("digest", "");
+                    long size = asset.optLong("size", 0);
+                    String url = asset.getString("browser_download_url");
+                    if (!digest.matches("(?i)sha256:[0-9a-f]{64}") || size <= 0 ||
+                            size > MAX_UPDATE_BYTES || !trustedUpdateUrl(url, latestTag, name)) {
+                        notifyUser("This release has no verifiable APK. Check GitHub releases instead.");
+                        return;
+                    }
+                    offerUpdate(latestTag, release.optString("body", ""), url, name, digest, size);
                     return;
                 }
             }
@@ -226,10 +255,27 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void offerUpdate(String version, String notes, String url, String fileName) {
+    private void offerUpdate(String version, String notes, String url, String fileName, String digest, long size) {
         String script = "showUpdateAvailable(" + jsonString(version) + "," + jsonString(notes) + "," +
                 jsonString(url) + "," + jsonString(fileName) + ")";
-        runOnUiThread(() -> webView.evaluateJavascript(script, null));
+        runOnUiThread(() -> {
+            offeredUrl = url;
+            offeredName = fileName;
+            offeredVersion = version;
+            offeredDigest = digest;
+            offeredSize = size;
+            webView.evaluateJavascript(script, null);
+        });
+    }
+
+    private boolean trustedUpdateUrl(String url, String version, String fileName) {
+        Uri uri = Uri.parse(url);
+        java.util.List<String> parts = uri.getPathSegments();
+        return "https".equals(uri.getScheme()) && "github.com".equals(uri.getHost()) &&
+                parts.size() == 6 && "BearJ3rk".equals(parts.get(0)) &&
+                "MTG-Life-Scouter".equals(parts.get(1)) && "releases".equals(parts.get(2)) &&
+                "download".equals(parts.get(3)) && version.equals(parts.get(4)) &&
+                fileName.equals(parts.get(5));
     }
 
     private void openReleasesPage(String message) {
@@ -257,33 +303,168 @@ public class MainActivity extends Activity {
 
     private void startUpdateDownload(String url, String fileName, String version) {
         runOnUiThread(() -> {
-            DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url));
-            request.setTitle("MTG Life Scouter " + version);
-            request.setDescription("Downloading signed update");
-            request.setMimeType("application/vnd.android.package-archive");
-            request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
-            request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName);
-            DownloadManager manager = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
-            updateDownloadId = manager.enqueue(request);
-            getSharedPreferences(UPDATE_PREFS, MODE_PRIVATE).edit().putLong(UPDATE_DOWNLOAD_ID, updateDownloadId).apply();
-            Toast.makeText(this, "Downloading " + version + "…", Toast.LENGTH_LONG).show();
+            if (offeredUrl == null || !offeredUrl.equals(url) || !offeredName.equals(fileName) ||
+                    !offeredVersion.equals(version) || !trustedUpdateUrl(url, version, fileName) ||
+                    versionNumber(version) <= versionNumber(currentVersion())) {
+                notifyUser("Update details changed. Check for updates again.");
+                return;
+            }
+            long existingId = getSharedPreferences(UPDATE_PREFS, MODE_PRIVATE)
+                    .getLong(UPDATE_DOWNLOAD_ID, -1);
+            if (existingId != -1) {
+                updateDownloadId = existingId;
+                installDownloadedApk(existingId);
+                notifyUser("Checking the existing update download.");
+                return;
+            }
+            try {
+                DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url));
+                request.setTitle("MTG Life Scouter " + version);
+                request.setDescription("Downloading update for verification");
+                request.setMimeType("application/vnd.android.package-archive");
+                request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+                request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName);
+                DownloadManager manager = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
+                updateDownloadId = manager.enqueue(request);
+                getSharedPreferences(UPDATE_PREFS, MODE_PRIVATE).edit()
+                        .putLong(UPDATE_DOWNLOAD_ID, updateDownloadId)
+                        .putString(UPDATE_VERSION, offeredVersion)
+                        .putString(UPDATE_DIGEST, offeredDigest)
+                        .putLong(UPDATE_SIZE, offeredSize)
+                        .apply();
+                Toast.makeText(this, "Downloading " + version + "…", Toast.LENGTH_LONG).show();
+            } catch (Exception error) {
+                notifyUser("Could not start the update download.");
+            }
         });
     }
 
     private void installDownloadedApk(long id) {
+        if (!updateVerificationRunning.compareAndSet(false, true)) return;
+        new Thread(() -> {
+            try { verifyAndInstallDownloadedApk(id); }
+            catch (Exception error) {
+                clearPendingUpdate();
+                notifyUser("Update verification failed. Check for updates again.");
+            }
+            finally { updateVerificationRunning.set(false); }
+        }).start();
+    }
+
+    private void verifyAndInstallDownloadedApk(long id) {
         DownloadManager manager = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
         Cursor cursor = manager.query(new DownloadManager.Query().setFilterById(id));
-        if (cursor == null || !cursor.moveToFirst()) return;
-        int status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
-        cursor.close();
+        if (cursor == null) {
+            clearPendingUpdate();
+            notifyUser("Update download is no longer available.");
+            return;
+        }
+        int status;
+        try {
+            if (!cursor.moveToFirst()) {
+                clearPendingUpdate();
+                notifyUser("Update download is no longer available.");
+                return;
+            }
+            status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
+        } finally {
+            cursor.close();
+        }
         if (status == DownloadManager.STATUS_FAILED) {
-            getSharedPreferences(UPDATE_PREFS, MODE_PRIVATE).edit().remove(UPDATE_DOWNLOAD_ID).apply();
+            clearPendingUpdate();
             notifyUser("Update download failed.");
             return;
         }
         if (status != DownloadManager.STATUS_SUCCESSFUL) return;
         Uri apk = manager.getUriForDownloadedFile(id);
-        if (apk == null) { notifyUser("The downloaded update could not be opened."); return; }
+        if (apk == null) {
+            clearPendingUpdate();
+            notifyUser("Update download could not be opened.");
+            return;
+        }
+        SharedPreferences pending = getSharedPreferences(UPDATE_PREFS, MODE_PRIVATE);
+        String version = pending.getString(UPDATE_VERSION, "");
+        String expectedDigest = pending.getString(UPDATE_DIGEST, "");
+        long expectedSize = pending.getLong(UPDATE_SIZE, 0);
+        if (!expectedDigest.matches("(?i)sha256:[0-9a-f]{64}") || expectedSize <= 0 ||
+                expectedSize > MAX_UPDATE_BYTES || !version.matches("v[0-9]+\\.[0-9]+(\\.[0-9]+)?")) {
+            clearPendingUpdate();
+            notifyUser("Update verification details are missing. Check for updates again.");
+            return;
+        }
+        File copy = null;
+        try {
+            copy = File.createTempFile("verified-update-", ".apk", getCacheDir());
+            MessageDigest sha256 = MessageDigest.getInstance("SHA-256");
+            long actualSize = 0;
+            try (InputStream input = getContentResolver().openInputStream(apk);
+                 FileOutputStream output = new FileOutputStream(copy)) {
+                if (input == null) throw new Exception("Update download could not be read.");
+                byte[] buffer = new byte[8192];
+                int count;
+                while ((count = input.read(buffer)) != -1) {
+                    actualSize += count;
+                    if (actualSize > MAX_UPDATE_BYTES) throw new Exception("Update APK is too large.");
+                    sha256.update(buffer, 0, count);
+                    output.write(buffer, 0, count);
+                }
+            }
+            if (actualSize != expectedSize || !hex(sha256.digest()).equalsIgnoreCase(expectedDigest.substring(7))) {
+                throw new Exception("Update checksum or file size does not match GitHub.");
+            }
+            verifyApkIdentity(copy, version);
+            runOnUiThread(() -> openVerifiedInstaller(apk, id));
+        } catch (Exception error) {
+            clearPendingUpdate();
+            String message = error.getMessage();
+            notifyUser(message != null && message.startsWith("Update ") ? message :
+                    "Update verification failed. Check for updates again.");
+        } finally {
+            if (copy != null && !copy.delete()) copy.deleteOnExit();
+        }
+    }
+
+    private void verifyApkIdentity(File apk, String expectedVersion) throws Exception {
+        PackageManager packages = getPackageManager();
+        int flags = Build.VERSION.SDK_INT >= 28 ? PackageManager.GET_SIGNING_CERTIFICATES : PackageManager.GET_SIGNATURES;
+        PackageInfo candidate = packages.getPackageArchiveInfo(apk.getAbsolutePath(), flags);
+        PackageInfo installed = packages.getPackageInfo(getPackageName(), flags);
+        if (candidate == null || !getPackageName().equals(candidate.packageName)) {
+            throw new Exception("Update belongs to a different app.");
+        }
+        long candidateCode = Build.VERSION.SDK_INT >= 28 ? candidate.getLongVersionCode() : candidate.versionCode;
+        long installedCode = Build.VERSION.SDK_INT >= 28 ? installed.getLongVersionCode() : installed.versionCode;
+        if (candidateCode <= installedCode || candidate.versionName == null ||
+                versionNumber(candidate.versionName) != versionNumber(expectedVersion)) {
+            throw new Exception("Update version does not match the release or is not newer.");
+        }
+        Signature[] candidateSigners = Build.VERSION.SDK_INT >= 28 && candidate.signingInfo != null ?
+                candidate.signingInfo.getApkContentsSigners() : candidate.signatures;
+        Signature[] installedSigners = Build.VERSION.SDK_INT >= 28 && installed.signingInfo != null ?
+                installed.signingInfo.getApkContentsSigners() : installed.signatures;
+        if (candidateSigners == null || installedSigners == null || candidateSigners.length == 0 ||
+                candidateSigners.length != installedSigners.length) {
+            throw new Exception("Update signing certificate does not match this app.");
+        }
+        for (int i = 0; i < candidateSigners.length; i++) {
+            if (!Arrays.equals(candidateSigners[i].toByteArray(), installedSigners[i].toByteArray())) {
+                throw new Exception("Update signing certificate does not match this app.");
+            }
+        }
+    }
+
+    private String hex(byte[] bytes) {
+        char[] digits = "0123456789abcdef".toCharArray();
+        char[] result = new char[bytes.length * 2];
+        for (int i = 0; i < bytes.length; i++) {
+            result[i * 2] = digits[(bytes[i] >> 4) & 15];
+            result[i * 2 + 1] = digits[bytes[i] & 15];
+        }
+        return new String(result);
+    }
+
+    private void openVerifiedInstaller(Uri apk, long id) {
+        if (id != updateDownloadId) return;
         if (Build.VERSION.SDK_INT >= 26 && !getPackageManager().canRequestPackageInstalls()) {
             Toast.makeText(this, "Allow MTG Life Scouter to install updates. The installer will open when you return.", Toast.LENGTH_LONG).show();
             startActivity(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + getPackageName())));
@@ -294,11 +475,15 @@ public class MainActivity extends Activity {
         install.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
         try {
             startActivity(install);
-            updateDownloadId = -1;
-            getSharedPreferences(UPDATE_PREFS, MODE_PRIVATE).edit().remove(UPDATE_DOWNLOAD_ID).apply();
+            clearPendingUpdate();
         } catch (Exception error) {
-            notifyUser("Android could not open the update installer. Tap the completed download notification to install it.");
+            notifyUser("Android could not open the verified update installer.");
         }
+    }
+
+    private void clearPendingUpdate() {
+        updateDownloadId = -1;
+        getSharedPreferences(UPDATE_PREFS, MODE_PRIVATE).edit().clear().apply();
     }
 
     @Override protected void onResume() {
